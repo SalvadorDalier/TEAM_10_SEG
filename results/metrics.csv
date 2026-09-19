@@ -1,0 +1,4 @@
+Method,Recall@3,QPS,Memory (MB)
+inverted,0.7667,4223.0,591.64
+hnsw,1.0,189846.26,591.75
+learned,1.0,12686.78,587.14
