@@ -126,7 +126,7 @@ class LearnedIndexTrainer:
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Tạo tập dữ liệu (X, y): Với mỗi query, gán nhãn là cluster ID của doc gần nhất."""
         augmented_queries = self.augment_queries(queries, n_augment=4)
-        labels: list[int] = []
+        labels: List[int] = []
 
         for q in augmented_queries:
             # Tính Cosine similarity: do vector đã chuẩn hóa L2, tích vô hướng chính là cosine sim

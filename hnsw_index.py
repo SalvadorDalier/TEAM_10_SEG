@@ -95,10 +95,10 @@ class HNSWIndex:
 
             if self.backend == "hnswlib":
                 labels, distances = self.index.knn_query(query_reshaped, k=k)
-                return [(int(lbl), float(dst)) for lbl, dst in zip(labels[0], distances[0])]
+                return [(int(lbl), float(dst)) for lbl, dst in zip(labels[0], distances[0]) if int(lbl) >= 0]
             else:  # backend == "faiss"
                 distances, labels = self.index.search(query_reshaped, k)
-                return [(int(lbl), float(dst)) for lbl, dst in zip(labels[0], distances[0])]
+                return [(int(lbl), float(dst)) for lbl, dst in zip(labels[0], distances[0]) if int(lbl) >= 0]
         except Exception as e:
             print(f"[ERROR] Lỗi khi truy vấn HNSW Index: {e}")
             return []

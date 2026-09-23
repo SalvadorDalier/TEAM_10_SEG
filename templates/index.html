@@ -1,0 +1,1567 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vector DB — Learned Index vs HNSW vs Inverted</title>
+    <!-- Google Fonts: Top 1 Font Plus Jakarta Sans & Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              ice: {
+                50: "#f0f7ff",
+                100: "#e0f2fe",
+                200: "#bae6fd",
+                300: "#7dd3fc",
+                400: "#38bdf8",
+                500: "#0ea5e9",
+                600: "#0284c7",
+                700: "#0369a1",
+                800: "#075985",
+                900: "#0c4a6e",
+              },
+            },
+            fontFamily: {
+              sans: [
+                '"Plus Jakarta Sans"',
+                "system-ui",
+                "-apple-system",
+                "sans-serif",
+              ],
+            },
+            boxShadow: {
+              "google-light":
+                "0 4px 20px -2px rgba(14, 165, 233, 0.12), 0 2px 6px rgba(0, 0, 0, 0.04)",
+              "google-focus":
+                "0 8px 30px -4px rgba(14, 165, 233, 0.25), 0 0 0 3px rgba(14, 165, 233, 0.15)",
+              dropdown:
+                "0 12px 32px -4px rgba(14, 165, 233, 0.16), 0 4px 12px -2px rgba(0, 0, 0, 0.04)",
+              "soft-card":
+                "0 8px 24px -6px rgba(186, 230, 253, 0.4), 0 2px 6px -1px rgba(0, 0, 0, 0.02)",
+              "glass-glow": "0 8px 32px 0 rgba(31, 38, 135, 0.07)",
+            },
+          },
+        },
+      };
+    </script>
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <style>
+      body {
+        background: linear-gradient(
+          135deg,
+          #f0f7ff 0%,
+          #e0f2fe 50%,
+          #f8fafc 100%
+        );
+        min-height: 100vh;
+        font-family: "Plus Jakarta Sans", sans-serif;
+      }
+
+      /* Glassmorphism Components */
+      .glass-header {
+        background: rgba(255, 255, 255, 0.75);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border-bottom: 1px solid rgba(224, 242, 254, 0.8);
+      }
+
+      .glass-card {
+        background: rgba(255, 255, 255, 0.68);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.85);
+        box-shadow:
+          0 8px 30px -6px rgba(14, 165, 233, 0.08),
+          0 1px 3px rgba(0, 0, 0, 0.02);
+      }
+      .glass-card:hover {
+        background: rgba(255, 255, 255, 0.82);
+        border-color: rgba(186, 230, 253, 0.9);
+      }
+
+      .glass-search-bar {
+        background: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(186, 230, 253, 0.9);
+      }
+      .glass-search-bar:hover {
+        background: rgba(255, 255, 255, 0.95);
+        border-color: rgba(56, 189, 248, 0.7);
+      }
+
+      .glass-dropdown {
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(186, 230, 253, 0.8);
+      }
+
+      .hero-glow {
+        background: radial-gradient(
+          circle at 50% 30%,
+          rgba(186, 230, 253, 0.5),
+          transparent 70%
+        );
+      }
+
+      /* Tab Transition Animation (Smooth Fade + Slide) */
+      .tab-content-panel {
+        transition:
+          opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+          transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        will-change: opacity, transform;
+      }
+      .tab-content-panel.tab-enter {
+        opacity: 0;
+        transform: translateY(10px) scale(0.99);
+      }
+      .tab-content-panel.tab-active {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+
+      /* Skeleton Shimmer */
+      .skeleton {
+        position: relative;
+        overflow: hidden;
+        background-color: rgba(224, 242, 254, 0.7);
+        backdrop-filter: blur(4px);
+      }
+      .skeleton::after {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        transform: translateX(-100%);
+        background-image: linear-gradient(
+          90deg,
+          rgba(255, 255, 255, 0) 0,
+          rgba(255, 255, 255, 0.6) 20%,
+          rgba(255, 255, 255, 0.8) 60%,
+          rgba(255, 255, 255, 0)
+        );
+        animation: shimmer 1.5s infinite;
+        content: "";
+      }
+      @keyframes shimmer {
+        100% {
+          transform: translateX(100%);
+        }
+      }
+    </style>
+  </head>
+  <body
+    class="text-slate-800 font-sans min-h-screen antialiased selection:bg-ice-500 selection:text-white flex flex-col justify-between"
+  >
+    <!-- ==================== HEADER (LOGO LEFT, NAV RIGHT VIA SPACE-BETWEEN) ==================== -->
+    <header
+      class="sticky top-0 z-50 glass-header border-b border-sky-100 shadow-sm transition-all"
+    >
+      <div
+        class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between"
+      >
+        <!-- Left: Logo & Brand -->
+        <div
+          class="flex items-center space-x-3 cursor-pointer shrink-0"
+          onclick="switchTab('search')"
+        >
+          <div
+            class="h-9 w-9 rounded-xl bg-gradient-to-tr from-ice-600 via-sky-500 to-cyan-400 p-0.5 shadow-md shadow-sky-500/20 flex items-center justify-center"
+          >
+            <div
+              class="h-full w-full bg-white rounded-[10px] flex items-center justify-center"
+            >
+              <svg
+                class="w-5 h-5 text-ice-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2.5"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+            </div>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span
+              class="text-base font-extrabold tracking-tight bg-gradient-to-r from-ice-700 via-sky-600 to-blue-600 bg-clip-text text-transparent"
+            >
+              VectorDB
+            </span>
+            <span
+              class="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-sky-100 text-ice-700 border border-sky-200"
+              >PoC</span
+            >
+          </div>
+        </div>
+
+        <!-- Right: Navigation Tabs + Live Status Indicator -->
+        <div class="flex items-center space-x-3">
+          <nav
+            class="flex items-center p-1 bg-sky-100/70 border border-sky-200/80 rounded-xl shadow-inner"
+          >
+            <button
+              onclick="switchTab('search')"
+              id="nav-btn-search"
+              title="Tìm kiếm (Search)"
+              class="nav-tab p-2 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center bg-ice-600 text-white shadow-sm"
+            >
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+            </button>
+            <button
+              onclick="switchTab('dashboard')"
+              id="nav-btn-dashboard"
+              title="Bảng điều khiển (Dashboard)"
+              class="nav-tab p-2 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center text-slate-600 hover:text-ice-700 hover:bg-white/60"
+            >
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                />
+              </svg>
+            </button>
+            <button
+              onclick="switchTab('comparison')"
+              id="nav-btn-comparison"
+              title="Chỉ số hiệu năng (Metrics)"
+              class="nav-tab p-2 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center text-slate-600 hover:text-ice-700 hover:bg-white/60"
+            >
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                />
+              </svg>
+            </button>
+            <button
+              onclick="switchTab('about')"
+              id="nav-btn-about"
+              title="Thông tin đề tài (Info)"
+              class="nav-tab p-2 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center text-slate-600 hover:text-ice-700 hover:bg-white/60"
+            >
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </button>
+          </nav>
+
+          <!-- Live Indicator -->
+          <div
+            class="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 border border-emerald-200 text-emerald-700 shrink-0"
+          >
+            <span
+              class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"
+            ></span>
+            <span id="statusBadge">Live</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ==================== MAIN CONTENT (FLEX COLUMN CENTERED) ==================== -->
+    <main
+      class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-grow w-full flex flex-col items-center justify-center"
+    >
+      <!-- ==================== TAB 1: GOOGLE-INSPIRED HERO & SEARCH ==================== -->
+      <section
+        id="tab-search"
+        class="tab-content-panel tab-active w-full flex flex-col items-center justify-center space-y-6"
+      >
+        <!-- Hero Centered Container -->
+        <div
+          class="hero-glow w-full max-w-3xl pt-8 pb-4 px-4 flex flex-col items-center text-center"
+        >
+          <!-- Google Style Branding -->
+          <div
+            class="mb-6 select-none flex items-center justify-center gap-1 font-extrabold"
+          >
+            <span class="text-4xl sm:text-5xl tracking-tight text-blue-600"
+              >V</span
+            >
+            <span class="text-4xl sm:text-5xl tracking-tight text-sky-500"
+              >e</span
+            >
+            <span class="text-4xl sm:text-5xl tracking-tight text-cyan-500"
+              >c</span
+            >
+            <span class="text-4xl sm:text-5xl tracking-tight text-teal-500"
+              >t</span
+            >
+            <span class="text-4xl sm:text-5xl tracking-tight text-indigo-500"
+              >o</span
+            >
+            <span class="text-4xl sm:text-5xl tracking-tight text-blue-600"
+              >r</span
+            >
+            <span
+              class="text-4xl sm:text-5xl tracking-tight ml-2 bg-gradient-to-r from-blue-600 to-sky-500 bg-clip-text text-transparent"
+              >Search</span
+            >
+          </div>
+
+          <!-- Google Pill Search Bar (Transparent Glassmorphism) -->
+          <div class="w-full max-w-2xl relative" id="searchContainer">
+            <div
+              class="relative flex items-center glass-search-bar focus-within:border-ice-500 focus-within:shadow-google-focus rounded-full px-5 py-3.5 transition-all duration-300 shadow-google-light z-30"
+            >
+              <!-- Search Icon -->
+              <svg
+                class="w-5 h-5 text-sky-500 shrink-0 mr-3"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+
+              <!-- Input -->
+              <input
+                type="text"
+                id="searchInput"
+                autocomplete="off"
+                placeholder="Tìm kiếm vector ngữ nghĩa..."
+                class="w-full bg-transparent text-sm sm:text-base text-slate-800 placeholder-slate-400 outline-none pr-2 font-medium"
+              />
+
+              <!-- Clear Icon -->
+              <button
+                onclick="clearSearch()"
+                id="btnClear"
+                class="hidden text-slate-400 hover:text-slate-600 p-1 mr-1"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+
+              <!-- Top-K Selector -->
+              <div
+                class="flex items-center border-l border-sky-200/80 pl-3 ml-1 shrink-0"
+              >
+                <select
+                  id="topK"
+                  class="bg-transparent text-xs font-bold text-ice-700 outline-none cursor-pointer"
+                >
+                  <option value="3" class="bg-white/95 text-slate-700">
+                    Top 3
+                  </option>
+                  <option value="5" class="bg-white/95 text-slate-700">
+                    Top 5
+                  </option>
+                  <option value="10" class="bg-white/95 text-slate-700">
+                    Top 10
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Autocomplete Dropdown Overlay (Transparent Glassmorphism) -->
+            <div
+              id="recommendationsDropdown"
+              class="hidden absolute left-0 right-0 top-full mt-2 glass-dropdown rounded-2xl shadow-dropdown z-40 overflow-hidden text-left divide-y divide-sky-100/60 animate-in fade-in duration-150"
+            >
+              <div
+                id="recommendationsList"
+                class="max-h-64 overflow-y-auto py-1"
+              >
+                <!-- Populated dynamically via JS -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Google Action Buttons (Transparent Glass style) -->
+          <div class="flex items-center justify-center gap-3 mt-5">
+            <button
+              onclick="doSearch()"
+              id="btnSearch"
+              class="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-white/70 hover:bg-white/95 border border-sky-200/80 hover:border-sky-300 text-slate-700 hover:text-ice-700 backdrop-blur-md transition-all flex items-center gap-2 shadow-sm active:scale-95"
+            >
+              <svg
+                class="w-4 h-4 text-sky-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+              <span>Tìm kiếm Vector</span>
+            </button>
+            <button
+              onclick="setQuery('Mai Đăng Phước')"
+              class="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-amber-50/70 hover:bg-amber-100/90 border border-amber-200/80 hover:border-amber-300 text-amber-800 backdrop-blur-md transition-all flex items-center gap-2 shadow-sm active:scale-95"
+            >
+              <svg
+                class="w-4 h-4 text-amber-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"
+                />
+              </svg>
+              <span>Mai Đăng Phước</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Search Results Display Section (with Skeleton State & Transparent Glass Card) -->
+        <div id="searchResults" class="w-full max-w-5xl pt-2">
+          <div
+            class="glass-card rounded-2xl p-8 text-center text-slate-500 flex flex-col items-center justify-center"
+          >
+            <div
+              class="h-12 w-12 rounded-full bg-sky-100/80 flex items-center justify-center mb-2 text-sky-600"
+            >
+              <svg
+                class="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+            </div>
+            <p class="text-xs text-slate-500 font-bold">
+              Bắt đầu gõ để tìm kiếm trên 3 giải thuật Vector Index
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 2: DASHBOARD BENCHMARK ==================== -->
+      <section
+        id="tab-dashboard"
+        class="tab-content-panel hidden w-full max-w-5xl space-y-6 flex-col items-center"
+      >
+        <!-- Metric KPI Summary Strip -->
+        <div
+          id="metricsGrid"
+          class="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full"
+        >
+          <div class="glass-card rounded-2xl p-4 space-y-3">
+            <div class="flex justify-between items-center">
+              <div class="skeleton h-5 w-24 rounded-full"></div>
+              <div class="skeleton h-4 w-12 rounded-md"></div>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div class="skeleton h-14 rounded-xl"></div>
+              <div class="skeleton h-14 rounded-xl"></div>
+              <div class="skeleton h-14 rounded-xl"></div>
+            </div>
+          </div>
+          <div class="glass-card rounded-2xl p-4 space-y-3">
+            <div class="flex justify-between items-center">
+              <div class="skeleton h-5 w-24 rounded-full"></div>
+              <div class="skeleton h-4 w-12 rounded-md"></div>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div class="skeleton h-14 rounded-xl"></div>
+              <div class="skeleton h-14 rounded-xl"></div>
+              <div class="skeleton h-14 rounded-xl"></div>
+            </div>
+          </div>
+          <div class="glass-card rounded-2xl p-4 space-y-3">
+            <div class="flex justify-between items-center">
+              <div class="skeleton h-5 w-24 rounded-full"></div>
+              <div class="skeleton h-4 w-12 rounded-md"></div>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div class="skeleton h-14 rounded-xl"></div>
+              <div class="skeleton h-14 rounded-xl"></div>
+              <div class="skeleton h-14 rounded-xl"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts Grid (2x2) -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 w-full">
+          <!-- Recall Chart -->
+          <div class="glass-card rounded-2xl p-4 sm:p-5">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="p-1.5 rounded-lg bg-sky-100/80 text-sky-700"
+                ><svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  /></svg
+              ></span>
+              <span class="text-xs font-bold text-slate-800">Recall@3</span>
+            </div>
+            <div class="h-56 relative" id="chartRecallContainer">
+              <canvas id="chartRecall"></canvas>
+            </div>
+          </div>
+
+          <!-- QPS Chart -->
+          <div class="glass-card rounded-2xl p-4 sm:p-5">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="p-1.5 rounded-lg bg-emerald-100/80 text-emerald-700"
+                ><svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                  /></svg
+              ></span>
+              <span class="text-xs font-bold text-slate-800"
+                >Throughput QPS</span
+              >
+            </div>
+            <div class="h-56 relative" id="chartQPSContainer">
+              <canvas id="chartQPS"></canvas>
+            </div>
+          </div>
+
+          <!-- Memory Chart -->
+          <div class="glass-card rounded-2xl p-4 sm:p-5">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="p-1.5 rounded-lg bg-amber-100/80 text-amber-700"
+                ><svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"
+                  /></svg
+              ></span>
+              <span class="text-xs font-bold text-slate-800">RAM (MB)</span>
+            </div>
+            <div class="h-56 relative" id="chartMemoryContainer">
+              <canvas id="chartMemory"></canvas>
+            </div>
+          </div>
+
+          <!-- Radar Chart -->
+          <div class="glass-card rounded-2xl p-4 sm:p-5">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="p-1.5 rounded-lg bg-purple-100/80 text-purple-700"
+                ><svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"
+                  /></svg
+              ></span>
+              <span class="text-xs font-bold text-slate-800"
+                >Overall Profile</span
+              >
+            </div>
+            <div class="h-56 relative" id="chartRadarContainer">
+              <canvas id="chartRadar"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Run Benchmark Trigger -->
+        <div class="text-center pt-2">
+          <button
+            onclick="runBenchmark()"
+            id="btnBenchmark"
+            class="inline-flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-ice-600 to-sky-600 hover:from-ice-700 hover:to-sky-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md shadow-sky-500/25 transition active:scale-95 disabled:opacity-50"
+          >
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            <span>Tái lập Benchmark</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 3: METRICS TABLE ==================== -->
+      <section
+        id="tab-comparison"
+        class="tab-content-panel hidden w-full max-w-5xl space-y-6 flex-col items-center"
+      >
+        <div class="glass-card rounded-2xl overflow-hidden w-full">
+          <div class="px-5 py-3.5 border-b border-sky-100/80 bg-sky-50/40">
+            <div class="flex items-center gap-2">
+              <span class="p-1 rounded-md bg-sky-100/80 text-sky-700"
+                ><svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M3 10h18M3 14h18"
+                  /></svg
+              ></span>
+              <span class="font-extrabold text-xs sm:text-sm text-slate-800"
+                >So sánh Hiệu năng</span
+              >
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table
+              class="w-full text-left text-xs sm:text-sm text-slate-700 font-medium"
+            >
+              <thead
+                class="bg-sky-50/50 text-[11px] uppercase tracking-wider text-slate-500 border-b border-sky-100/80 font-bold"
+              >
+                <tr>
+                  <th class="px-5 py-3">Phương pháp</th>
+                  <th class="px-5 py-3">Recall@3</th>
+                  <th class="px-5 py-3">QPS</th>
+                  <th class="px-5 py-3">RAM</th>
+                  <th class="px-5 py-3">Đánh giá</th>
+                </tr>
+              </thead>
+              <tbody id="comparisonBody" class="divide-y divide-sky-100/60">
+                <tr>
+                  <td colspan="5" class="p-4">
+                    <div class="skeleton h-6 w-full rounded-md"></div>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="5" class="p-4">
+                    <div class="skeleton h-6 w-full rounded-md"></div>
+                  </td>
+                </tr>
+                <tr>
+                  <td colspan="5" class="p-4">
+                    <div class="skeleton h-6 w-full rounded-md"></div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Analysis Box (Transparent Clean Cards) -->
+        <div
+          id="analysisContent"
+          class="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full"
+        >
+          <div class="skeleton h-20 rounded-2xl"></div>
+          <div class="skeleton h-20 rounded-2xl"></div>
+          <div class="skeleton h-20 rounded-2xl"></div>
+        </div>
+      </section>
+
+      <!-- ==================== TAB 4: INFO ==================== -->
+      <section
+        id="tab-about"
+        class="tab-content-panel hidden w-full max-w-5xl space-y-4 flex-col items-center"
+      >
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+          <div class="glass-card rounded-2xl p-5 flex items-center gap-3.5">
+            <span class="p-2 rounded-xl bg-sky-100/80 text-sky-700 shrink-0"
+              ><svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                /></svg
+            ></span>
+            <div>
+              <h4 class="font-bold text-xs sm:text-sm text-slate-800">
+                Vấn đề
+              </h4>
+              <p class="text-xs text-slate-500 font-medium">
+                Lời nguyền chiều nguyên trên Inverted Index
+              </p>
+            </div>
+          </div>
+          <div class="glass-card rounded-2xl p-5 flex items-center gap-3.5">
+            <span
+              class="p-2 rounded-xl bg-emerald-100/80 text-emerald-700 shrink-0"
+              ><svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                /></svg
+            ></span>
+            <div>
+              <h4 class="font-bold text-xs sm:text-sm text-slate-800">
+                Giải pháp
+              </h4>
+              <p class="text-xs text-slate-500 font-medium">
+                HNSW & Learned Index (MLP)
+              </p>
+            </div>
+          </div>
+          <div class="glass-card rounded-2xl p-5 flex items-center gap-3.5">
+            <span
+              class="p-2 rounded-xl bg-purple-100/80 text-purple-700 shrink-0"
+              ><svg
+                class="w-5 h-5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                /></svg
+            ></span>
+            <div>
+              <h4 class="font-bold text-xs sm:text-sm text-slate-800">
+                Mô hình
+              </h4>
+              <p class="text-xs text-slate-500 font-medium">
+                all-MiniLM-L6-v2 (384D)
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ==================== FOOTER ==================== -->
+    <footer
+      class="border-t border-sky-100/80 bg-white/50 backdrop-blur-md py-4 text-center text-xs text-slate-500"
+    >
+      <div
+        class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2"
+      >
+        <span class="flex items-center gap-1.5 font-bold text-slate-600">
+          <span class="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
+          Đề tài 4: Tối ưu hóa Chỉ mục Vector
+        </span>
+        <span class="font-extrabold text-slate-500"
+          >TEAM 10 SEG &nbsp;|&nbsp; 2026</span
+        >
+      </div>
+    </footer>
+
+    <!-- ==================== JAVASCRIPT ==================== -->
+    <script>
+      const METHOD_META = {
+        inverted: {
+          name: "Inverted Index",
+          color: "#0284c7",
+          bg: "rgba(2, 132, 199, 0.15)",
+          badge: "bg-sky-50 text-sky-700 border-sky-200",
+        },
+        hnsw: {
+          name: "HNSW Index",
+          color: "#059669",
+          bg: "rgba(5, 150, 105, 0.15)",
+          badge: "bg-emerald-50 text-emerald-700 border-emerald-200",
+        },
+        learned: {
+          name: "Learned Index",
+          color: "#d97706",
+          bg: "rgba(217, 119, 6, 0.15)",
+          badge: "bg-amber-50 text-amber-700 border-amber-200",
+        },
+      };
+
+      const SUGGESTIONS = [
+        "Mai Đăng Phước",
+        "tác giả Mai Đăng Phước vector database",
+        "Nghiên cứu của tác giả Mai Đăng Phước về tối ưu hóa Vector Database",
+        "tối ưu hóa Vector Database",
+        "cấu trúc Learned Index",
+        "thuật toán HNSW",
+        "xe hơi màu đỏ",
+        "ô tô đỏ đẹp",
+        "xe đạp điện xanh lá",
+        "giao hàng siêu tốc 30 phút",
+        "vận chuyển đường dài giá rẻ",
+        "xe tải chở hàng siêu trọng 10 tấn",
+        "trạm sạc xe điện thông minh",
+        "máy bay thương mại quốc tế",
+        "tàu hỏa chở container Bắc Nam",
+        "tàu thủy chở hàng xuyên đại dương",
+        "xe buýt giờ cao điểm",
+        "tàu điện metro số 1",
+        "kho bãi logistics tự động hóa",
+        "drone giao hàng bưu phẩm",
+        "mô hình Sentence Transformers",
+        "đánh giá Recall và QPS",
+        "hệ thống RAG cơ sở dữ liệu vector",
+      ];
+
+      let metricsData = null;
+      let charts = {};
+      let activeSuggestionIndex = -1;
+
+      // Tab Switcher with Transfer Transition Animation
+      function switchTab(tabId) {
+        const tabs = ["search", "dashboard", "comparison", "about"];
+        tabs.forEach((id) => {
+          const sec = document.getElementById("tab-" + id);
+          const btn = document.getElementById("nav-btn-" + id);
+          if (id === tabId) {
+            sec.classList.remove("hidden");
+            sec.classList.add("flex");
+            sec.classList.remove("tab-active");
+            sec.classList.add("tab-enter");
+
+            // Trigger smooth entrance
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                sec.classList.remove("tab-enter");
+                sec.classList.add("tab-active");
+              });
+            });
+
+            btn.className =
+              "nav-tab p-2 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center bg-ice-600 text-white shadow-sm";
+          } else {
+            sec.classList.add("hidden");
+            sec.classList.remove("flex", "tab-active", "tab-enter");
+            btn.className =
+              "nav-tab p-2 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center text-slate-600 hover:text-ice-700 hover:bg-white/60";
+          }
+        });
+        if (tabId === "dashboard") {
+          setTimeout(() => {
+            Object.values(charts).forEach((c) => {
+              if (c && c.resize) c.resize();
+            });
+          }, 80);
+        }
+      }
+
+      function fmtNum(n) {
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+        return n.toFixed(1);
+      }
+
+      function escHtml(s) {
+        const d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function clearSearch() {
+        document.getElementById("searchInput").value = "";
+        document.getElementById("btnClear").classList.add("hidden");
+        hideRecommendations();
+        document.getElementById("searchInput").focus();
+      }
+
+      // ==================== AUTOCOMPLETE RECOMMENDATION LOGIC ====================
+      function showRecommendations(query = "") {
+        const dropdown = document.getElementById("recommendationsDropdown");
+        const list = document.getElementById("recommendationsList");
+        const cleanQ = query.trim().toLowerCase();
+        activeSuggestionIndex = -1;
+
+        let matches = [];
+        if (cleanQ === "") {
+          matches = [
+            "⭐ Mai Đăng Phước",
+            "⭐ tác giả Mai Đăng Phước vector database",
+            "xe hơi màu đỏ",
+            "giao hàng nhanh",
+            "tàu điện metro mới",
+            "vận chuyển giá rẻ",
+          ];
+        } else {
+          matches = SUGGESTIONS.filter((item) =>
+            item.toLowerCase().includes(cleanQ),
+          );
+          if (matches.length === 0) {
+            matches.push(cleanQ);
+          }
+        }
+
+        list.innerHTML = matches
+          .slice(0, 6)
+          .map((item, idx) => {
+            const rawVal = item.replace(/^⭐\s*/, "");
+            return `
+                    <div id="rec-item-${idx}" onclick="selectRecommendation('${escapeJsString(rawVal)}')" class="rec-item px-4 py-2.5 hover:bg-sky-50/80 cursor-pointer flex items-center justify-between group transition-colors">
+                        <div class="flex items-center gap-2.5">
+                            <svg class="w-4 h-4 text-sky-400 group-hover:text-sky-600 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                            <span class="text-xs sm:text-sm text-slate-700 group-hover:text-ice-900 font-semibold">${escHtml(item)}</span>
+                        </div>
+                        <svg class="w-3.5 h-3.5 text-slate-300 group-hover:text-sky-500 transition opacity-0 group-hover:opacity-100" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                    </div>
+                `;
+          })
+          .join("");
+
+        dropdown.classList.remove("hidden");
+      }
+
+      function hideRecommendations() {
+        setTimeout(() => {
+          const dropdown = document.getElementById("recommendationsDropdown");
+          if (dropdown) dropdown.classList.add("hidden");
+        }, 150);
+      }
+
+      function selectRecommendation(val) {
+        document.getElementById("searchInput").value = val;
+        document.getElementById("btnClear").classList.remove("hidden");
+        document
+          .getElementById("recommendationsDropdown")
+          .classList.add("hidden");
+        doSearch();
+      }
+
+      function escapeJsString(str) {
+        return str.replace(/'/g, "\\'");
+      }
+
+      // ==================== SKELETON LOADERS ====================
+      function renderSearchSkeleton(query) {
+        const container = document.getElementById("searchResults");
+        container.innerHTML = `
+                <div class="mb-4 flex items-center justify-between text-xs text-slate-500 glass-card px-4 py-2.5 rounded-xl">
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-400 font-medium">Query:</span>
+                        <strong class="text-sky-700 font-bold">"${escHtml(query)}"</strong>
+                    </div>
+                    <div class="skeleton h-4 w-24 rounded-md"></div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    ${[1, 2, 3]
+                      .map(
+                        () => `
+                        <div class="glass-card rounded-2xl overflow-hidden flex flex-col p-4 space-y-3">
+                            <div class="flex justify-between items-center pb-2 border-b border-sky-100/60">
+                                <div class="skeleton h-5 w-24 rounded-full"></div>
+                                <div class="skeleton h-4 w-12 rounded-md"></div>
+                            </div>
+                            <div class="space-y-3 pt-1">
+                                <div class="flex items-start gap-2.5">
+                                    <div class="skeleton w-5 h-5 rounded-full shrink-0"></div>
+                                    <div class="flex-grow space-y-1.5">
+                                        <div class="skeleton h-3.5 w-full rounded"></div>
+                                        <div class="skeleton h-2.5 w-16 rounded"></div>
+                                    </div>
+                                </div>
+                                <div class="flex items-start gap-2.5">
+                                    <div class="skeleton w-5 h-5 rounded-full shrink-0"></div>
+                                    <div class="flex-grow space-y-1.5">
+                                        <div class="skeleton h-3.5 w-5/6 rounded"></div>
+                                        <div class="skeleton h-2.5 w-16 rounded"></div>
+                                    </div>
+                                </div>
+                                <div class="flex items-start gap-2.5">
+                                    <div class="skeleton w-5 h-5 rounded-full shrink-0"></div>
+                                    <div class="flex-grow space-y-1.5">
+                                        <div class="skeleton h-3.5 w-4/6 rounded"></div>
+                                        <div class="skeleton h-2.5 w-16 rounded"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `,
+                      )
+                      .join("")}
+                </div>
+            `;
+      }
+
+      function renderDashboardSkeleton() {
+        const grid = document.getElementById("metricsGrid");
+        grid.innerHTML = [1, 2, 3]
+          .map(
+            () => `
+                <div class="glass-card rounded-2xl p-4 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <div class="skeleton h-5 w-24 rounded-full"></div>
+                        <div class="skeleton h-4 w-12 rounded-md"></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <div class="skeleton h-14 rounded-xl"></div>
+                        <div class="skeleton h-14 rounded-xl"></div>
+                        <div class="skeleton h-14 rounded-xl"></div>
+                    </div>
+                </div>
+            `,
+          )
+          .join("");
+      }
+
+      // ==================== METRICS FETCH & DASHBOARD ====================
+      async function loadMetrics() {
+        try {
+          const resp = await fetch("/api/metrics");
+          metricsData = await resp.json();
+          renderDashboard(metricsData);
+          document.getElementById("statusBadge").textContent = "Live";
+        } catch (err) {
+          document.getElementById("statusBadge").textContent = "Offline";
+        }
+      }
+
+      function renderDashboard(data) {
+        renderMetricCards(data);
+        renderCharts(data);
+        renderComparisonTable(data);
+        renderAnalysis(data);
+      }
+
+      function renderMetricCards(data) {
+        const grid = document.getElementById("metricsGrid");
+        grid.innerHTML = "";
+        const bestRecall = Math.max(...data.map((d) => d.recall));
+        const bestQPS = Math.max(...data.map((d) => d.qps));
+        const bestMem = Math.min(...data.map((d) => d.memory));
+
+        data.forEach((d) => {
+          const m = METHOD_META[d.method] || {
+            name: d.method,
+            badge: "bg-slate-100 text-slate-700",
+          };
+          grid.innerHTML += `
+                    <div class="glass-card rounded-2xl p-4 transition duration-200">
+                        <div class="flex items-center justify-between mb-2.5">
+                            <span class="text-xs font-bold px-2.5 py-0.5 rounded-full border ${m.badge}">${m.name}</span>
+                        </div>
+                        <div class="grid grid-cols-3 gap-1.5 text-center">
+                            <div class="bg-sky-50/50 p-2 rounded-xl border border-sky-100/60">
+                                <span class="text-[9px] text-slate-500 font-bold block">Recall</span>
+                                <span class="text-sm font-extrabold ${d.recall >= bestRecall ? "text-emerald-600" : "text-slate-700"}">${d.recall.toFixed(4)}</span>
+                            </div>
+                            <div class="bg-sky-50/50 p-2 rounded-xl border border-sky-100/60">
+                                <span class="text-[9px] text-slate-500 font-bold block">QPS</span>
+                                <span class="text-sm font-extrabold ${d.qps >= bestQPS ? "text-sky-600" : "text-slate-700"}">${fmtNum(d.qps)}</span>
+                            </div>
+                            <div class="bg-sky-50/50 p-2 rounded-xl border border-sky-100/60">
+                                <span class="text-[9px] text-slate-500 font-bold block">RAM</span>
+                                <span class="text-sm font-extrabold ${d.memory <= bestMem ? "text-amber-600" : "text-slate-700"}">${d.memory.toFixed(1)}M</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+        });
+      }
+
+      function renderCharts(data) {
+        Object.values(charts).forEach((c) => {
+          if (c && c.destroy) c.destroy();
+        });
+        charts = {};
+
+        const labels = data.map((d) => METHOD_META[d.method]?.name || d.method);
+        const colors = data.map(
+          (d) => METHOD_META[d.method]?.color || "#0284c7",
+        );
+
+        const baseOptions = {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: {
+              ticks: {
+                color: "#64748b",
+                font: { family: "Plus Jakarta Sans", size: 10, weight: 700 },
+              },
+              grid: { color: "rgba(14, 165, 233, 0.08)" },
+            },
+            y: {
+              ticks: {
+                color: "#64748b",
+                font: { family: "Plus Jakarta Sans", size: 10, weight: 600 },
+              },
+              grid: { color: "rgba(14, 165, 233, 0.08)" },
+            },
+          },
+        };
+
+        charts.recall = new Chart(document.getElementById("chartRecall"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                data: data.map((d) => d.recall),
+                backgroundColor: colors,
+                borderRadius: 6,
+              },
+            ],
+          },
+          options: {
+            ...baseOptions,
+            scales: {
+              ...baseOptions.scales,
+              y: { ...baseOptions.scales.y, min: 0, max: 1.1 },
+            },
+          },
+        });
+
+        charts.qps = new Chart(document.getElementById("chartQPS"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                data: data.map((d) => d.qps),
+                backgroundColor: colors,
+                borderRadius: 6,
+              },
+            ],
+          },
+          options: {
+            ...baseOptions,
+            scales: {
+              ...baseOptions.scales,
+              y: { ...baseOptions.scales.y, type: "logarithmic" },
+            },
+          },
+        });
+
+        charts.memory = new Chart(document.getElementById("chartMemory"), {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                data: data.map((d) => d.memory),
+                backgroundColor: colors,
+                borderRadius: 6,
+              },
+            ],
+          },
+          options: baseOptions,
+        });
+
+        const maxQ = Math.max(...data.map((d) => d.qps));
+        const minM = Math.min(...data.map((d) => d.memory));
+        charts.radar = new Chart(document.getElementById("chartRadar"), {
+          type: "radar",
+          data: {
+            labels: ["Recall@3", "QPS", "RAM"],
+            datasets: data.map((d) => {
+              const m = METHOD_META[d.method] || {
+                name: d.method,
+                color: "#0284c7",
+                bg: "rgba(2,132,199,0.15)",
+              };
+              return {
+                label: m.name,
+                data: [d.recall, d.qps / maxQ, minM / d.memory],
+                backgroundColor: m.bg,
+                borderColor: m.color,
+                borderWidth: 1.5,
+                pointRadius: 3,
+                pointBackgroundColor: m.color,
+              };
+            }),
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              r: {
+                min: 0,
+                max: 1.0,
+                ticks: {
+                  color: "#64748b",
+                  backdropColor: "transparent",
+                  stepSize: 0.33,
+                  font: { family: "Plus Jakarta Sans" },
+                },
+                grid: { color: "rgba(14, 165, 233, 0.15)" },
+                pointLabels: {
+                  color: "#334155",
+                  font: { family: "Plus Jakarta Sans", size: 10, weight: 700 },
+                },
+                angleLines: { color: "rgba(14, 165, 233, 0.15)" },
+              },
+            },
+            plugins: {
+              legend: {
+                labels: {
+                  color: "#475569",
+                  font: { family: "Plus Jakarta Sans", size: 10, weight: 600 },
+                },
+              },
+            },
+          },
+        });
+      }
+
+      function renderComparisonTable(data) {
+        const tbody = document.getElementById("comparisonBody");
+        const bestRecall = Math.max(...data.map((d) => d.recall));
+        const bestQPS = Math.max(...data.map((d) => d.qps));
+        const bestMem = Math.min(...data.map((d) => d.memory));
+
+        tbody.innerHTML = data
+          .map((d) => {
+            const meta = METHOD_META[d.method] || {
+              name: d.method,
+              badge: "bg-slate-100 text-slate-700",
+            };
+            const badges = [];
+            if (d.recall >= bestRecall)
+              badges.push(
+                '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">100% Accuracy</span>',
+              );
+            if (d.qps >= bestQPS)
+              badges.push(
+                '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200">Max Speed</span>',
+              );
+            if (d.memory <= bestMem)
+              badges.push(
+                '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">Low RAM</span>',
+              );
+
+            return `
+                    <tr class="hover:bg-sky-50/40 transition">
+                        <td class="px-5 py-3.5"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold border ${meta.badge}">${meta.name}</span></td>
+                        <td class="px-5 py-3.5 font-mono font-bold ${d.recall >= bestRecall ? "text-emerald-600" : "text-slate-700"}">${d.recall.toFixed(4)}</td>
+                        <td class="px-5 py-3.5 font-mono font-bold ${d.qps >= bestQPS ? "text-sky-600" : "text-slate-700"}">${d.qps.toLocaleString()}</td>
+                        <td class="px-5 py-3.5 font-mono font-bold ${d.memory <= bestMem ? "text-amber-600" : "text-slate-700"}">${d.memory.toFixed(2)} MB</td>
+                        <td class="px-5 py-3.5"><div class="flex flex-wrap gap-1">${badges.join("")}</div></td>
+                    </tr>
+                `;
+          })
+          .join("");
+      }
+
+      function renderAnalysis(data) {
+        const container = document.getElementById("analysisContent");
+        const inv = data.find((d) => d.method === "inverted");
+        const hnsw = data.find((d) => d.method === "hnsw");
+        const learned = data.find((d) => d.method === "learned");
+        if (!inv || !hnsw || !learned) return;
+
+        container.innerHTML = `
+                <div class="glass-card p-4 rounded-2xl flex items-center gap-3">
+                    <span class="p-2 rounded-xl bg-emerald-100/80 text-emerald-700 shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg></span>
+                    <div>
+                        <h4 class="font-extrabold text-xs text-slate-800">Recall@3 = 1.0</h4>
+                        <p class="text-[11px] text-slate-500 font-medium">HNSW & Learned Index đạt độ chính xác tuyệt đối</p>
+                    </div>
+                </div>
+                <div class="glass-card p-4 rounded-2xl flex items-center gap-3">
+                    <span class="p-2 rounded-xl bg-sky-100/80 text-sky-700 shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg></span>
+                    <div>
+                        <h4 class="font-extrabold text-xs text-slate-800">${fmtNum(hnsw.qps)} QPS</h4>
+                        <p class="text-[11px] text-slate-500 font-medium">HNSW xử lý vượt trội trên dữ liệu vector</p>
+                    </div>
+                </div>
+                <div class="glass-card p-4 rounded-2xl flex items-center gap-3">
+                    <span class="p-2 rounded-xl bg-purple-100/80 text-purple-700 shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg></span>
+                    <div>
+                        <h4 class="font-extrabold text-xs text-slate-800">Learned Index</h4>
+                        <p class="text-[11px] text-slate-500 font-medium">Tối ưu phân vùng bằng Machine Learning</p>
+                    </div>
+                </div>
+            `;
+      }
+
+      function setQuery(text) {
+        document.getElementById("searchInput").value = text;
+        document.getElementById("btnClear").classList.remove("hidden");
+        hideRecommendations();
+        switchTab("search");
+        doSearch();
+      }
+
+      async function doSearch() {
+        const query = document.getElementById("searchInput").value.trim();
+        const k = parseInt(document.getElementById("topK").value);
+        if (!query) return;
+
+        hideRecommendations();
+        renderSearchSkeleton(query);
+
+        const btn = document.getElementById("btnSearch");
+        btn.disabled = true;
+
+        try {
+          const resp = await fetch("/api/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query, k }),
+          });
+          const data = await resp.json();
+          renderSearchResults(data, query);
+        } catch (err) {
+          alert("Lỗi: " + err.message);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      function renderSearchResults(data, query) {
+        const container = document.getElementById("searchResults");
+        if (!data.results) return;
+
+        const methods = ["inverted", "hnsw", "learned"];
+        container.innerHTML = `
+                <div class="mb-4 flex items-center justify-between text-xs text-slate-600 glass-card px-4 py-2.5 rounded-xl animate-in fade-in duration-200">
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-400 font-medium">Query:</span>
+                        <strong class="text-sky-700 font-bold">"${escHtml(query)}"</strong>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-slate-500 font-mono text-[11px] font-bold">
+                        <svg class="w-3.5 h-3.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span>${data.embed_time_ms?.toFixed(2) || "—"} ms</span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-in fade-in duration-300">
+                    ${methods
+                      .map((m) => {
+                        const res = data.results[m];
+                        const meta = METHOD_META[m] || {
+                          name: m,
+                          badge: "bg-slate-100 text-slate-700",
+                        };
+                        if (!res) return "";
+                        return `
+                            <div class="glass-card rounded-2xl overflow-hidden flex flex-col transition duration-200">
+                                <div class="px-4 py-2.5 border-b border-sky-100/60 flex items-center justify-between bg-sky-50/40">
+                                    <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${meta.badge}">${meta.name}</span>
+                                    <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-white/80 text-slate-600 border border-sky-100 font-bold">${res.search_time_ms?.toFixed(3) || "—"} ms</span>
+                                </div>
+                                <div class="p-3 divide-y divide-sky-100/50 flex-grow space-y-2.5">
+                                    ${
+                                      res.docs && res.docs.length > 0
+                                        ? res.docs
+                                            .map(
+                                              (d, i) => `
+                                        <div class="pt-2.5 first:pt-0 flex items-start gap-2.5">
+                                            <span class="w-5 h-5 rounded-full ${i === 0 ? "bg-sky-100 text-sky-700 border-sky-300" : "bg-slate-100 text-slate-500 border-slate-200"} flex items-center justify-center text-[10px] font-extrabold shrink-0 mt-0.5 border">${i + 1}</span>
+                                            <div>
+                                                <p class="text-xs sm:text-sm font-semibold text-slate-800 leading-snug">${escHtml(d.text)}</p>
+                                                <span class="text-[10px] font-mono text-slate-400 mt-0.5 block font-bold">#doc-${d.doc_id}</span>
+                                            </div>
+                                        </div>
+                                    `,
+                                            )
+                                            .join("")
+                                        : '<p class="text-xs text-slate-400 text-center py-4">Không tìm thấy</p>'
+                                    }
+                                </div>
+                            </div>
+                        `;
+                      })
+                      .join("")}
+                </div>
+            `;
+      }
+
+      async function runBenchmark() {
+        const btn = document.getElementById("btnBenchmark");
+        btn.disabled = true;
+        btn.innerHTML = `<svg class="animate-spin h-4 w-4 text-white inline" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg><span>Đang đo lường...</span>`;
+
+        renderDashboardSkeleton();
+
+        try {
+          const resp = await fetch("/api/benchmark", { method: "POST" });
+          const data = await resp.json();
+          if (data.metrics) {
+            metricsData = data.metrics;
+            renderDashboard(metricsData);
+          }
+        } catch (err) {
+          alert("Lỗi: " + err.message);
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg><span>Tái lập Benchmark</span>`;
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const input = document.getElementById("searchInput");
+        const dropdown = document.getElementById("recommendationsDropdown");
+
+        input.addEventListener("focus", () => {
+          showRecommendations(input.value);
+        });
+        input.addEventListener("input", () => {
+          document
+            .getElementById("btnClear")
+            .classList.toggle("hidden", !input.value.trim());
+          showRecommendations(input.value);
+        });
+        input.addEventListener("keydown", (e) => {
+          const items = document.querySelectorAll(".rec-item");
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            if (items.length > 0) {
+              activeSuggestionIndex =
+                (activeSuggestionIndex + 1) % items.length;
+              updateActiveSuggestion(items);
+            }
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            if (items.length > 0) {
+              activeSuggestionIndex =
+                (activeSuggestionIndex - 1 + items.length) % items.length;
+              updateActiveSuggestion(items);
+            }
+          } else if (e.key === "Escape") {
+            if (dropdown) dropdown.classList.add("hidden");
+          } else if (e.key === "Enter") {
+            if (activeSuggestionIndex >= 0 && items[activeSuggestionIndex]) {
+              items[activeSuggestionIndex].click();
+            } else {
+              if (dropdown) dropdown.classList.add("hidden");
+              doSearch();
+            }
+          }
+        });
+
+        function updateActiveSuggestion(items) {
+          items.forEach((it, i) => {
+            if (i === activeSuggestionIndex) {
+              it.classList.add("bg-sky-100/90");
+              const text =
+                it.querySelector("span")?.textContent?.replace(/^⭐\s*/, "") ||
+                "";
+              if (text) input.value = text;
+            } else {
+              it.classList.remove("bg-sky-100/90");
+            }
+          });
+        }
+
+        document.addEventListener("click", (e) => {
+          const container = document.getElementById("searchContainer");
+          if (container && !container.contains(e.target)) {
+            if (dropdown) dropdown.classList.add("hidden");
+          }
+        });
+
+        loadMetrics();
+      });
+    </script>
+  </body>
+</html>
